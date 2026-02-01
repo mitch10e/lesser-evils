@@ -8,7 +8,7 @@ Welcome to Phase 1 of building your tactical RPG! This tutorial will guide you t
 
 In this phase, you'll create:
 - A centralized `GameState` that holds all game data
-- Individual state classes for Campaign, Squad, Resources, Factions, Morals, Tech, and Branching
+- Individual state classes for Campaign, Squad, Resources, Factions, Tech, and Branching
 - A manager singleton that provides easy access to all state
 - Editor tools for debugging and testing
 - Automated tests to verify everything works
@@ -363,9 +363,9 @@ namespace Game.Core.Data
 
 **What you learned:** The `[Serializable]` attribute tells Unity this struct can be saved/loaded. The static factory method `CreateDefault` gives us a convenient way to create units with sensible starting values.
 
-### Step 3.2: MoralChoice Struct
+### Step 3.2: Choice Struct
 
-Create `Assets/Scripts/Core/Data/Structs/MoralChoice.cs`:
+Create `Assets/Scripts/Core/Data/Structs/Choice.cs`:
 
 ```csharp
 using System;
@@ -373,11 +373,11 @@ using System;
 namespace Game.Core.Data
 {
     /// <summary>
-    /// Records a single moral decision made during gameplay.
-    /// Used to track player's ethical journey and influence endings.
+    /// Records a single decision made during gameplay.
+    /// Used to track player decisions and influence consequences.
     /// </summary>
     [Serializable]
-    public struct MoralChoice
+    public struct Choice
     {
         /// <summary>ID of the mission where this choice occurred.</summary>
         public string MissionId;
@@ -388,33 +388,33 @@ namespace Game.Core.Data
         /// <summary>Human-readable description of the choice made.</summary>
         public string Description;
 
-        /// <summary>True if player chose the ethical option, false if efficient.</summary>
-        public bool WasEthical;
+        /// <summary>Which option the player selected (e.g., OptionA vs OptionB).</summary>
+        public int SelectedOption;
 
-        /// <summary>How much this choice shifted the moral meter (positive = ethical).</summary>
-        public int MoralImpact;
+        /// <summary>How much this choice impacts game state.</summary>
+        public int Impact;
 
         /// <summary>Game turn when this choice was made. For timeline tracking.</summary>
         public int TurnNumber;
 
         /// <summary>
-        /// Creates a moral choice record.
+        /// Creates a choice record.
         /// </summary>
-        public static MoralChoice Create(
+        public static Choice Create(
             string missionId,
             string choiceId,
             string description,
-            bool wasEthical,
+            int selectedOption,
             int impact,
             int turn)
         {
-            return new MoralChoice
+            return new Choice
             {
                 MissionId = missionId,
                 ChoiceId = choiceId,
                 Description = description,
-                WasEthical = wasEthical,
-                MoralImpact = impact,
+                SelectedOption = selectedOption,
+                Impact = impact,
                 TurnNumber = turn
             };
         }
@@ -460,8 +460,8 @@ namespace Game.Core.Data
         /// <summary>Resources spent during the mission.</summary>
         public Dictionary<ResourceType, int> ResourcesSpent;
 
-        /// <summary>Moral choices made during this mission.</summary>
-        public List<MoralChoice> MoralChoicesMade;
+        /// <summary>Choices made during this mission.</summary>
+        public List<Choice> ChoicesMade;
 
         /// <summary>Game turn when mission was completed.</summary>
         public int CompletedOnTurn;
@@ -480,7 +480,7 @@ namespace Game.Core.Data
                 DeadUnitIds = new List<string>(),
                 ResourcesGained = new Dictionary<ResourceType, int>(),
                 ResourcesSpent = new Dictionary<ResourceType, int>(),
-                MoralChoicesMade = new List<MoralChoice>(),
+                ChoicesMade = new List<Choice>(),
                 CompletedOnTurn = 0
             };
         }
@@ -501,11 +501,6 @@ namespace Game.Core.Data
     /// </summary>
     public static class GameConstants
     {
-        // Moral System
-        public const int MORAL_METER_MIN = -100;
-        public const int MORAL_METER_MAX = 100;
-        public const int MORAL_METER_START = 0;
-
         // Loyalty System
         public const int LOYALTY_MIN = -100;
         public const int LOYALTY_MAX = 100;
@@ -654,128 +649,7 @@ namespace Game.Core.States
 
 **What you learned:** Notice how `SpendResource` returns a boolean to indicate success/failure. This prevents bugs where you might accidentally spend resources the player doesn't have.
 
-### Step 4.2: MoralState
-
-Create `Assets/Scripts/Core/States/MoralState.cs`:
-
-```csharp
-using System;
-using System.Collections.Generic;
-using Game.Core.Data;
-
-namespace Game.Core.States
-{
-    /// <summary>
-    /// Tracks the player's moral journey through the campaign.
-    /// The moral meter influences squad loyalty, AI escalation, and endings.
-    /// </summary>
-    [Serializable]
-    public class MoralState
-    {
-        /// <summary>
-        /// Current moral standing (-100 = ruthless, 100 = ethical).
-        /// </summary>
-        public int MoralMeter;
-
-        /// <summary>
-        /// Complete history of moral choices for consequence tracking.
-        /// </summary>
-        public List<MoralChoice> ChoiceHistory;
-
-        /// <summary>
-        /// Count of choices where player chose the ethical path.
-        /// </summary>
-        public int TotalEthicalChoices;
-
-        /// <summary>
-        /// Count of choices where player chose efficiency over ethics.
-        /// </summary>
-        public int TotalEfficientChoices;
-
-        public MoralState()
-        {
-            MoralMeter = GameConstants.MORAL_METER_START;
-            ChoiceHistory = new List<MoralChoice>();
-            TotalEthicalChoices = 0;
-            TotalEfficientChoices = 0;
-        }
-
-        /// <summary>
-        /// Records a moral choice and updates the meter.
-        /// </summary>
-        public void RecordChoice(MoralChoice choice)
-        {
-            ChoiceHistory.Add(choice);
-            ModifyMoral(choice.MoralImpact);
-
-            if (choice.WasEthical)
-            {
-                TotalEthicalChoices++;
-            }
-            else
-            {
-                TotalEfficientChoices++;
-            }
-        }
-
-        /// <summary>
-        /// Adjusts the moral meter by the given delta.
-        /// Positive values push toward ethical, negative toward ruthless.
-        /// </summary>
-        public void ModifyMoral(int delta)
-        {
-            MoralMeter += delta;
-            MoralMeter = Math.Clamp(MoralMeter, GameConstants.MORAL_METER_MIN, GameConstants.MORAL_METER_MAX);
-        }
-
-        /// <summary>
-        /// Returns true if player is on the ethical side of the meter.
-        /// </summary>
-        public bool IsEthicalPath()
-        {
-            return MoralMeter > 0;
-        }
-
-        /// <summary>
-        /// Returns true if player is on the ruthless side of the meter.
-        /// </summary>
-        public bool IsRuthlessPath()
-        {
-            return MoralMeter < 0;
-        }
-
-        /// <summary>
-        /// Returns the moral ratio from -1 (fully ruthless) to 1 (fully ethical).
-        /// Useful for scaling consequences or UI displays.
-        /// </summary>
-        public float GetMoralRatio()
-        {
-            return MoralMeter / 100f;
-        }
-
-        /// <summary>
-        /// Gets moral choices from a specific mission.
-        /// </summary>
-        public List<MoralChoice> GetChoicesFromMission(string missionId)
-        {
-            return ChoiceHistory.FindAll(c => c.MissionId == missionId);
-        }
-
-        /// <summary>
-        /// Resets to starting state.
-        /// </summary>
-        public void Reset()
-        {
-            MoralMeter = GameConstants.MORAL_METER_START;
-            ChoiceHistory.Clear();
-            TotalEthicalChoices = 0;
-            TotalEfficientChoices = 0;
-        }
-    }
-}
-```
-
-### Step 4.3: FactionState
+### Step 4.2: FactionState
 
 Create `Assets/Scripts/Core/States/FactionState.cs`:
 
@@ -967,7 +841,7 @@ namespace Game.Core.States
 }
 ```
 
-### Step 4.4: TechState
+### Step 4.3: TechState
 
 Create `Assets/Scripts/Core/States/TechState.cs`:
 
@@ -1088,7 +962,7 @@ namespace Game.Core.States
 }
 ```
 
-### Step 4.5: BranchState
+### Step 4.4: BranchState
 
 Create `Assets/Scripts/Core/States/BranchState.cs`:
 
@@ -1208,7 +1082,7 @@ namespace Game.Core.States
 }
 ```
 
-### Step 4.6: SquadState
+### Step 4.5: SquadState
 
 Create `Assets/Scripts/Core/States/SquadState.cs`:
 
@@ -1477,7 +1351,7 @@ namespace Game.Core.States
 }
 ```
 
-### Step 4.7: CampaignState
+### Step 4.6: CampaignState
 
 Create `Assets/Scripts/Core/States/CampaignState.cs`:
 
@@ -1710,9 +1584,6 @@ namespace Game.Core
         /// <summary>Faction relationships and status.</summary>
         public FactionState Factions;
 
-        /// <summary>Moral meter and choice history.</summary>
-        public MoralState Moral;
-
         /// <summary>Tech unlocks and research.</summary>
         public TechState Tech;
 
@@ -1729,7 +1600,6 @@ namespace Game.Core
             Squad = new SquadState();
             Resources = new ResourceState();
             Factions = new FactionState();
-            Moral = new MoralState();
             Tech = new TechState();
             Branch = new BranchState();
         }
@@ -1754,7 +1624,6 @@ namespace Game.Core
             Squad.Reset();
             Resources.Reset();
             Factions.Reset();
-            Moral.Reset();
             Tech.Reset();
             Branch.Reset();
         }
@@ -1821,16 +1690,6 @@ namespace Game.Core.Events
         public ResourceType ResourceType;
         public int OldAmount;
         public int NewAmount;
-    }
-
-    /// <summary>
-    /// Event fired when moral meter changes.
-    /// </summary>
-    public struct MoralChangedEvent
-    {
-        public int OldValue;
-        public int NewValue;
-        public int Delta;
     }
 
     /// <summary>
@@ -1953,7 +1812,6 @@ namespace Game.Core
         public SquadState Squad => CurrentState.Squad;
         public ResourceState Resources => CurrentState.Resources;
         public FactionState Factions => CurrentState.Factions;
-        public MoralState Moral => CurrentState.Moral;
         public TechState Tech => CurrentState.Tech;
         public BranchState Branch => CurrentState.Branch;
 
@@ -2045,12 +1903,6 @@ namespace Game.Core
             foreach (var gain in record.ResourcesGained)
             {
                 Resources.AddResource(gain.Key, gain.Value);
-            }
-
-            // Apply moral choices
-            foreach (var choice in record.MoralChoicesMade)
-            {
-                Moral.RecordChoice(choice);
             }
 
             // Update unit statuses
@@ -2283,109 +2135,7 @@ namespace Game.Tests.EditMode
 }
 ```
 
-### Step 6.2: MoralState Tests
-
-Create `Assets/Tests/EditMode/MoralStateTests.cs`:
-
-```csharp
-using NUnit.Framework;
-using Game.Core.Data;
-using Game.Core.States;
-
-namespace Game.Tests.EditMode
-{
-    [TestFixture]
-    public class MoralStateTests
-    {
-        private MoralState _state;
-
-        [SetUp]
-        public void SetUp()
-        {
-            _state = new MoralState();
-        }
-
-        [Test]
-        public void Constructor_StartsAtZero()
-        {
-            Assert.AreEqual(0, _state.MoralMeter);
-            Assert.AreEqual(0, _state.TotalEthicalChoices);
-            Assert.AreEqual(0, _state.TotalEfficientChoices);
-        }
-
-        [Test]
-        public void RecordChoice_Ethical_IncrementsCounter()
-        {
-            var choice = MoralChoice.Create("m1", "c1", "Save civilians", true, 10, 1);
-            _state.RecordChoice(choice);
-
-            Assert.AreEqual(1, _state.TotalEthicalChoices);
-            Assert.AreEqual(0, _state.TotalEfficientChoices);
-        }
-
-        [Test]
-        public void RecordChoice_Efficient_IncrementsCounter()
-        {
-            var choice = MoralChoice.Create("m1", "c1", "Rush objective", false, -10, 1);
-            _state.RecordChoice(choice);
-
-            Assert.AreEqual(0, _state.TotalEthicalChoices);
-            Assert.AreEqual(1, _state.TotalEfficientChoices);
-        }
-
-        [Test]
-        public void RecordChoice_AddsMoralImpact()
-        {
-            var choice = MoralChoice.Create("m1", "c1", "Test", true, 25, 1);
-            _state.RecordChoice(choice);
-
-            Assert.AreEqual(25, _state.MoralMeter);
-        }
-
-        [Test]
-        public void ModifyMoral_ClampsToMax()
-        {
-            _state.ModifyMoral(200);
-            Assert.AreEqual(GameConstants.MORAL_METER_MAX, _state.MoralMeter);
-        }
-
-        [Test]
-        public void ModifyMoral_ClampsToMin()
-        {
-            _state.ModifyMoral(-200);
-            Assert.AreEqual(GameConstants.MORAL_METER_MIN, _state.MoralMeter);
-        }
-
-        [Test]
-        public void IsEthicalPath_ReturnsTrue_WhenPositive()
-        {
-            _state.ModifyMoral(10);
-            Assert.IsTrue(_state.IsEthicalPath());
-            Assert.IsFalse(_state.IsRuthlessPath());
-        }
-
-        [Test]
-        public void IsRuthlessPath_ReturnsTrue_WhenNegative()
-        {
-            _state.ModifyMoral(-10);
-            Assert.IsTrue(_state.IsRuthlessPath());
-            Assert.IsFalse(_state.IsEthicalPath());
-        }
-
-        [Test]
-        public void GetMoralRatio_ReturnsCorrectValue()
-        {
-            _state.MoralMeter = 50;
-            Assert.AreEqual(0.5f, _state.GetMoralRatio(), 0.001f);
-
-            _state.MoralMeter = -50;
-            Assert.AreEqual(-0.5f, _state.GetMoralRatio(), 0.001f);
-        }
-    }
-}
-```
-
-### Step 6.3: SquadState Tests
+### Step 6.2: SquadState Tests
 
 Create `Assets/Tests/EditMode/SquadStateTests.cs`:
 
@@ -2737,12 +2487,12 @@ namespace Game.Editor
         {
             var moral = GameStateManager.Instance.Moral;
 
-            EditorGUILayout.LabelField("Moral State", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField("Meter State", EditorStyles.boldLabel);
 
-            // Moral meter with slider
+            // Meter display
             EditorGUILayout.BeginHorizontal();
-            EditorGUILayout.LabelField("Moral Meter:", GUILayout.Width(100));
-            EditorGUILayout.LabelField($"{moral.MoralMeter} ({(moral.IsEthicalPath() ? "Ethical" : moral.IsRuthlessPath() ? "Ruthless" : "Neutral")})");
+            EditorGUILayout.LabelField("Meter:", GUILayout.Width(100));
+            EditorGUILayout.LabelField($"{moral.MoralMeter} ({(moral.IsPositive() ? "Positive" : moral.IsNegative() ? "Negative" : "Neutral")})");
             EditorGUILayout.EndHorizontal();
 
             // Visual bar
@@ -2751,20 +2501,18 @@ namespace Game.Editor
             EditorGUI.ProgressBar(rect, normalizedValue, "");
 
             EditorGUILayout.Space();
-            EditorGUILayout.LabelField($"Ethical Choices: {moral.TotalEthicalChoices}");
-            EditorGUILayout.LabelField($"Efficient Choices: {moral.TotalEfficientChoices}");
             EditorGUILayout.LabelField($"Total Choices: {moral.ChoiceHistory.Count}");
 
             EditorGUILayout.Space();
             EditorGUILayout.BeginHorizontal();
-            if (GUILayout.Button("Add Ethical (+10)"))
+            if (GUILayout.Button("Add +10"))
             {
-                var choice = MoralChoice.Create("debug", "d1", "Debug ethical", true, 10, GameStateManager.Instance.Campaign.CurrentTurn);
+                var choice = Choice.Create("debug", "d1", "Debug positive", 0, 10, GameStateManager.Instance.Campaign.CurrentTurn);
                 moral.RecordChoice(choice);
             }
-            if (GUILayout.Button("Add Efficient (-10)"))
+            if (GUILayout.Button("Add -10"))
             {
-                var choice = MoralChoice.Create("debug", "d2", "Debug efficient", false, -10, GameStateManager.Instance.Campaign.CurrentTurn);
+                var choice = Choice.Create("debug", "d2", "Debug negative", 1, -10, GameStateManager.Instance.Campaign.CurrentTurn);
                 moral.RecordChoice(choice);
             }
             EditorGUILayout.EndHorizontal();
@@ -2892,7 +2640,7 @@ Assets/Scripts/Core/Data/Enums/
 
 Assets/Scripts/Core/Data/Structs/
   - UnitData.cs
-  - MoralChoice.cs
+  - Choice.cs
   - MissionRecord.cs
 
 Assets/Scripts/Core/Data/Constants/
