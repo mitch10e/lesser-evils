@@ -10,12 +10,10 @@ namespace Game.Core.States {
         public Dictionary<ResourceType, int> resources;
 
         public ResourceState() {
-            resources = new Dictionary<ResourceType, int> {
-                { ResourceType.Currency, GameConstants.START_CURRENCY },
-                { ResourceType.Alloys, GameConstants.START_ALLOY },
-                { ResourceType.TechComponents, GameConstants.START_TECH_COMPONENTS },
-                { ResourceType.Intel, GameConstants.START_INTEL }
-            };
+            resources = new Dictionary<ResourceType, int>();
+            foreach (ResourceType type in Enum.GetValues(typeof(ResourceType))) {
+                resources[type] = 0;
+            }
         }
 
         public int get(ResourceType type) {
@@ -52,10 +50,7 @@ namespace Game.Core.States {
         }
 
         public void reset() {
-            resources[ResourceType.Currency] = GameConstants.START_CURRENCY;
-            resources[ResourceType.Alloys] = GameConstants.START_ALLOY;
-            resources[ResourceType.TechComponents] = GameConstants.START_TECH_COMPONENTS;
-            resources[ResourceType.Intel] = GameConstants.START_INTEL;
+            resources.Clear();
         }
 
     }
