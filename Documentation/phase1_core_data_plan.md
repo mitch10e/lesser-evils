@@ -217,37 +217,7 @@ namespace Game.Core.Data
 }
 ```
 
-### Step 2.5: FactionRelationStatus Enum
-
-Create `Assets/Scripts/Core/Data/Enums/FactionRelationStatus.cs`:
-
-```csharp
-namespace Game.Core.Data
-{
-    /// <summary>
-    /// Describes the relationship between the player and a faction.
-    /// </summary>
-    public enum FactionRelationStatus
-    {
-        /// <summary>Normal operations. No special relationship.</summary>
-        Active,
-
-        /// <summary>Player is actively fighting this faction.</summary>
-        Targeted,
-
-        /// <summary>Faction was crippled in Act 2. Extinction tech destroyed.</summary>
-        Defeated,
-
-        /// <summary>Faction is building extinction tech in background while player focuses elsewhere.</summary>
-        Escalating,
-
-        /// <summary>Former ally turned enemy. Only applies after defection.</summary>
-        Hostile
-    }
-}
-```
-
-### Step 2.6: ResourceType Enum
+### Step 2.5: ResourceType Enum
 
 Create `Assets/Scripts/Core/Data/Enums/ResourceType.cs`:
 
@@ -655,191 +625,30 @@ Create `Assets/Scripts/Core/States/FactionState.cs`:
 
 ```csharp
 using System;
-using System.Collections.Generic;
 using Game.Core.Data;
 
-namespace Game.Core.States
-{
-    /// <summary>
-    /// Tracks relationships with all factions.
-    /// Drives mission availability, branching, and narrative tone.
-    /// </summary>
+namespace Game.Core.States {
+
     [Serializable]
-    public class FactionState
-    {
+    public class FactionState {
+
         /// <summary>The faction the player chose at game start.</summary>
         public FactionType PlayerFaction;
 
-        /// <summary>Loyalty values for each faction (-100 to 100).</summary>
-        public Dictionary<FactionType, int> LoyaltyValues;
-
-        /// <summary>Current relationship status with each faction.</summary>
-        public Dictionary<FactionType, FactionRelationStatus> FactionStatuses;
-
-        /// <summary>The faction currently being actively fought.</summary>
-        public FactionType TargetedFaction;
-
-        /// <summary>True if player has defected from their original faction.</summary>
-        public bool PlayerIsDefector;
-
-        public FactionState()
-        {
-            PlayerFaction = FactionType.None;
-            PlayerIsDefector = false;
-            TargetedFaction = FactionType.None;
-
-            LoyaltyValues = new Dictionary<FactionType, int>
-            {
-                { FactionType.Authoritarian, 0 },
-                { FactionType.Covenant, 0 },
-                { FactionType.Technocratic, 0 }
-            };
-
-            FactionStatuses = new Dictionary<FactionType, FactionRelationStatus>
-            {
-                { FactionType.Authoritarian, FactionRelationStatus.Active },
-                { FactionType.Covenant, FactionRelationStatus.Active },
-                { FactionType.Technocratic, FactionRelationStatus.Active }
-            };
-        }
-
-        /// <summary>
-        /// Sets the player's starting faction and initializes relationships.
-        /// Call this at game start after player makes their choice.
-        /// </summary>
-        public void SetPlayerFaction(FactionType faction)
-        {
-            PlayerFaction = faction;
-
-            // Start with high loyalty to chosen faction
-            LoyaltyValues[faction] = 75;
-
-            // Other factions start neutral
-            foreach (var f in LoyaltyValues.Keys)
-            {
-                if (f != faction)
-                {
-                    LoyaltyValues[f] = 0;
-                }
-            }
-        }
-
-        /// <summary>
-        /// Gets loyalty value for a faction.
-        /// </summary>
-        public int GetLoyalty(FactionType faction)
-        {
-            return LoyaltyValues.TryGetValue(faction, out int value) ? value : 0;
-        }
-
-        /// <summary>
-        /// Modifies loyalty with a faction. Clamps to valid range.
-        /// </summary>
-        public void ModifyLoyalty(FactionType faction, int delta)
-        {
-            if (!LoyaltyValues.ContainsKey(faction)) return;
-
-            LoyaltyValues[faction] += delta;
-            LoyaltyValues[faction] = Math.Clamp(
-                LoyaltyValues[faction],
-                GameConstants.LOYALTY_MIN,
-                GameConstants.LOYALTY_MAX
-            );
-        }
-
-        /// <summary>
-        /// Gets the relationship status with a faction.
-        /// </summary>
-        public FactionRelationStatus GetStatus(FactionType faction)
-        {
-            return FactionStatuses.TryGetValue(faction, out var status)
-                ? status
-                : FactionRelationStatus.Active;
-        }
-
-        /// <summary>
-        /// Sets the relationship status with a faction.
-        /// </summary>
-        public void SetStatus(FactionType faction, FactionRelationStatus status)
-        {
-            FactionStatuses[faction] = status;
-        }
-
-        /// <summary>
-        /// Marks a faction as the current target of player operations.
-        /// </summary>
-        public void SetTargetFaction(FactionType faction)
-        {
-            // Clear previous target
-            if (TargetedFaction != FactionType.None)
-            {
-                FactionStatuses[TargetedFaction] = FactionRelationStatus.Active;
-            }
-
-            TargetedFaction = faction;
-
-            if (faction != FactionType.None)
-            {
-                FactionStatuses[faction] = FactionRelationStatus.Targeted;
-            }
-        }
-
-        /// <summary>
-        /// Triggers player defection. Called at Act 2 decision point.
-        /// This makes the player's original faction hostile.
-        /// </summary>
-        public void TriggerDefection()
-        {
-            PlayerIsDefector = true;
-
-            // Former faction becomes hostile
-            FactionStatuses[PlayerFaction] = FactionRelationStatus.Hostile;
-            LoyaltyValues[PlayerFaction] = GameConstants.LOYALTY_MIN;
-        }
-
-        /// <summary>
-        /// Checks if a faction has been defeated.
-        /// </summary>
-        public bool IsFactionDefeated(FactionType faction)
-        {
-            return GetStatus(faction) == FactionRelationStatus.Defeated;
-        }
-
-        /// <summary>
-        /// Gets the non-targeted enemy faction (the one escalating in background).
-        /// </summary>
-        public FactionType GetEscalatingFaction()
-        {
-            foreach (var kvp in FactionStatuses)
-            {
-                if (kvp.Key != PlayerFaction &&
-                    kvp.Key != TargetedFaction &&
-                    kvp.Value != FactionRelationStatus.Defeated)
-                {
-                    return kvp.Key;
-                }
-            }
-            return FactionType.None;
-        }
-
-        /// <summary>
-        /// Resets to starting state.
-        /// </summary>
-        public void Reset()
-        {
-            PlayerFaction = FactionType.None;
-            PlayerIsDefector = false;
-            TargetedFaction = FactionType.None;
-
-            foreach (var faction in new[] { FactionType.Authoritarian, FactionType.Covenant, FactionType.Technocratic })
-            {
-                LoyaltyValues[faction] = 0;
-                FactionStatuses[faction] = FactionRelationStatus.Active;
-            }
-        }
     }
+
 }
 ```
+
+**Design Note:** You might wonder why we're keeping a whole class for a single field. Why not just put `PlayerFaction` directly on `GameState`?
+
+The answer is **future expansion**. Faction systems in games tend to grow—you may eventually want to track loyalty levels, defection status, faction relationships, or reputation modifiers. By keeping `FactionState` as its own class now (even if minimal), you:
+
+1. Maintain a consistent architecture with other `*State` classes
+2. Have a natural home for faction-related methods when you need them
+3. Avoid refactoring later when faction mechanics inevitably expand
+
+The cost of an almost-empty class is near zero. The cost of extracting faction logic from scattered locations later is much higher. Start simple, but leave room to grow.
 
 ### Step 4.3: TechState
 
@@ -1884,7 +1693,7 @@ namespace Game.Core
         public void StartNewGame(FactionType chosenFaction)
         {
             ResetToDefaults();
-            Factions.SetPlayerFaction(chosenFaction);
+            Factions.PlayerFaction = chosenFaction;
 
             // Add starting units based on faction
             CreateStartingSquad(chosenFaction);
@@ -1960,7 +1769,6 @@ namespace Game.Core
         /// </summary>
         public void TriggerDefection()
         {
-            Factions.TriggerDefection();
             Branch.SetPath(isLoyalist: false);
             Tech.RevokePrecursorAccess();
 
@@ -1986,13 +1794,12 @@ namespace Game.Core
         /// </summary>
         public void DefeatFaction(FactionType faction)
         {
-            Factions.SetStatus(faction, FactionRelationStatus.Defeated);
             Branch.SetDefeatedFaction(faction);
 
             OnFactionDefeated?.Invoke(faction);
             EventBus.Publish(new FactionDefeatedEvent { Faction = faction });
 
-            NotifyStateChanged("Factions");
+            NotifyStateChanged("Branch");
         }
 
         /// <summary>
@@ -2461,26 +2268,8 @@ namespace Game.Editor
 
             EditorGUILayout.LabelField("Faction State", EditorStyles.boldLabel);
             EditorGUILayout.LabelField("Player Faction:", factions.PlayerFaction.ToString());
-            EditorGUILayout.LabelField("Is Defector:", factions.PlayerIsDefector.ToString());
-            EditorGUILayout.LabelField("Target Faction:", factions.TargetedFaction.ToString());
 
-            EditorGUILayout.Space();
-            EditorGUILayout.LabelField("Faction Relations:", EditorStyles.boldLabel);
-
-            foreach (FactionType type in new[] { FactionType.Authoritarian, FactionType.Covenant, FactionType.Technocratic })
-            {
-                EditorGUILayout.BeginVertical("box");
-                EditorGUILayout.LabelField(type.ToString());
-                EditorGUILayout.LabelField($"  Loyalty: {factions.GetLoyalty(type)}");
-                EditorGUILayout.LabelField($"  Status: {factions.GetStatus(type)}");
-                EditorGUILayout.EndVertical();
-            }
-
-            EditorGUILayout.Space();
-            if (GUILayout.Button("Trigger Defection"))
-            {
-                GameStateManager.Instance.TriggerDefection();
-            }
+            // Future expansion: Add loyalty tracking, defection status, faction relationships here
         }
 
         private void DrawMoralTab()
@@ -2635,7 +2424,6 @@ Assets/Scripts/Core/Data/Enums/
   - FactionType.cs
   - UnitStatus.cs
   - MissionStatus.cs
-  - FactionRelationStatus.cs
   - ResourceType.cs
 
 Assets/Scripts/Core/Data/Structs/

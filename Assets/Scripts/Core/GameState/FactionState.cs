@@ -6,7 +6,9 @@ namespace Game.Core.States {
 
     [Serializable]
     public class FactionState {
-        // 4.2 FactionState
+
+        public FactionType PlayerFaction;
+
     }
 
 }
