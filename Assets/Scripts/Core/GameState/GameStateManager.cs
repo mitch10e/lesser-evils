@@ -4,6 +4,7 @@ using Game.Core.Data;
 using Game.Core.States;
 using Game.Core.Events;
 using Core.Game.Events;
+using Game.Core.SaveSystem;
 
 namespace Game.Core {
 
@@ -24,6 +25,20 @@ namespace Game.Core {
         public TechState technology => current.technology;
 
         public UnitRosterState roster => current.roster;
+
+        // MARK: - Events
+
+        public event Action<GameState> onStateChanged;
+
+        public event Action<MaterialType, int, int> materialsChanged;
+
+        public event Action<string, bool> missionCompleted;
+
+        public event Action<ResourceType, int, int> resourcesChanged;
+
+        public event Action<int> onGameSaved;
+
+        public event Action<int> onGameLoaded;
 
         // MARK: - Lifecycle
 
@@ -68,9 +83,66 @@ namespace Game.Core {
             notifyStateChanged("All");
         }
 
+        // MARK: - Save / Load
+
+        public bool saveGame(int slotIndex) {
+            bool success = SaveManager.instance.save(current, slotIndex);
+
+            if (success) {
+                onGameSaved?.Invoke(slotIndex);
+            }
+
+            return success;
+        }
+
+        public bool loadGame(int slotIndex) {
+            SaveData data = SaveManager.instance.load(slotIndex);
+
+            if (data == null) {
+                return false;
+            }
+
+            current = data.gameState;
+            notifyStateChanged("All");
+            onGameLoaded?.Invoke(slotIndex);
+
+            return true;
+        }
+
+        public bool autosave() {
+            return SaveManager.instance.autoSave(current);
+        }
+
+        public bool loadAutosave() {
+            SaveData data = SaveManager.instance.loadAutoSave();
+
+            if (data == null) {
+                return false;
+            }
+
+            current = data.gameState;
+            notifyStateChanged("All");
+            onGameLoaded?.Invoke(SaveConstants.AUTOSAVE_SLOT_INDEX);
+
+            return true;
+        }
+
+        public bool hasSaveGame(int slotIndex) {
+            return SaveManager.instance.slotExists(slotIndex);
+        }
+
+        public bool hasAutoSave() {
+            return SaveManager.instance.autoSaveExists();
+        }
+
+        public bool deleteSave(int slotIndex) {
+            return SaveManager.instance.delete(slotIndex);
+        }
+
         // MARK: - Private Methods
 
         private void notifyStateChanged(string system) {
+            onStateChanged?.Invoke(current);
             EventBus.publish(new StateChangedEvent { changedSystem = system });
         }
 
