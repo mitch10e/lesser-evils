@@ -1,4 +1,4 @@
-# 13. Combat Black Box (Test Harness)
+# 11. Combat Black Box (Test Harness)
 
 **Purpose:** Abstracts all combat resolution into a single input/output interface. For now, this is a **developer/designer test tool** that lets the team manually define mission outcomes so the rest of the systems can be built and tested without a finished combat system.
 

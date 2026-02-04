@@ -20,6 +20,8 @@ namespace Game.Core {
 
         public MaterialState materials => current.materials;
 
+        public ProgressionState progression => current.progression;
+
         public ResourceState resources => current.resources;
 
         public TechState technology => current.technology;

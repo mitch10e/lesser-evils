@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ren:*)",
+      "Bash(ren \"13_combat_black_box.md\" \"11_combat_black_box.md\")"
+    ]
+  }
+}

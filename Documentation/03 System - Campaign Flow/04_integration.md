@@ -18,12 +18,16 @@ This system follows the XCOM 2 model: **missions pause time**, while the **strat
 │                   STRATEGIC LAYER                        │
 │                  (Base/Geoscape)                         │
 │                                                          │
-│   Time ADVANCES via player actions:                      │
+│   Player queues actions:                                 │
 │   - Research a tech (costs X hours)                      │
 │   - Send squad on expedition (costs X hours)             │
 │   - Build/upgrade facility (costs X hours)               │
 │   - Rest/heal injured units (costs X hours)              │
 │   - Wait for mission opportunity (skip time)             │
+│                                                          │
+│   Player presses ADVANCE → time ticks forward visually   │
+│   Progress bars fill, events fire mid-flow               │
+│   Player can PAUSE at any time                           │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -37,7 +41,7 @@ using System;
 namespace Game.Core.Progression {
 
     [Serializable]
-    public struct TimeAction {
+    public class TimeAction {
 
         public string id;
 
@@ -45,55 +49,88 @@ namespace Game.Core.Progression {
 
         public int durationHours;
 
+        public int elapsedHours;
+
         public TimeActionType actionType;
 
         public string targetID;
 
-        public static TimeAction CreateResearch(string techID, string name, int hours) {
+        // MARK: - Properties
+
+        public float progress => durationHours > 0
+            ? (float)elapsedHours / durationHours
+            : 1f;
+
+        public bool isComplete => elapsedHours >= durationHours;
+
+        public int remainingHours => durationHours - elapsedHours;
+
+        // MARK: - Methods
+
+        /// <summary>
+        /// Advances this action by the given hours.
+        /// Returns true if the action completed during this tick.
+        /// </summary>
+        public bool tick(int hours) {
+            if (isComplete) return false;
+
+            bool wasPending = !isComplete;
+            elapsedHours = Math.Min(elapsedHours + hours, durationHours);
+            return wasPending && isComplete;
+        }
+
+        // MARK: - Factory Methods
+
+        public static TimeAction createResearch(string techID, string name, int hours) {
             return new TimeAction {
                 id = $"research_{techID}",
                 displayName = $"Research: {name}",
                 durationHours = hours,
+                elapsedHours = 0,
                 actionType = TimeActionType.Research,
                 targetID = techID
             };
         }
 
-        public static TimeAction CreateHealing(string unitID, string name, int hours) {
+        public static TimeAction createHealing(string unitID, string name, int hours) {
             return new TimeAction {
                 id = $"heal_{unitID}",
                 displayName = $"Healing: {name}",
                 durationHours = hours,
+                elapsedHours = 0,
                 actionType = TimeActionType.Healing,
                 targetID = unitID
             };
         }
 
-        public static TimeAction CreateExpedition(string expeditionID, int hours) {
+        public static TimeAction createExpedition(string expeditionID, int hours) {
             return new TimeAction {
                 id = $"expedition_{expeditionID}",
                 displayName = "Expedition",
                 durationHours = hours,
+                elapsedHours = 0,
                 actionType = TimeActionType.Expedition,
                 targetID = expeditionID
             };
         }
 
-        public static TimeAction CreateBuild(string facilityID, string name, int hours) {
+        public static TimeAction createBuild(string facilityID, string name, int hours) {
             return new TimeAction {
                 id = $"build_{facilityID}",
                 displayName = $"Build: {name}",
                 durationHours = hours,
+                elapsedHours = 0,
                 actionType = TimeActionType.Build,
                 targetID = facilityID
             };
         }
 
-        public static TimeAction CreateWait(int hours) {
+        public static TimeAction createWait(int hours) {
             return new TimeAction {
                 id = "wait",
                 displayName = "Wait",
                 durationHours = hours,
+                elapsedHours = 0,
                 actionType = TimeActionType.Wait,
                 targetID = null
             };
@@ -112,12 +149,19 @@ namespace Game.Core.Progression {
 }
 ```
 
+**Key changes from instant model:**
+- `TimeAction` is now a `class` instead of a `struct` so active actions can be mutated in-place as time ticks forward
+- `elapsedHours` tracks how far along the action is
+- `progress` (0.0–1.0) maps directly to a UI progress bar fill
+- `tick()` advances the action by a number of hours and returns `true` the moment it completes
+
 ## Step 4.2: Strategic Layer Manager
 
 Create `Assets/Scripts/Core/Progression/StrategicLayerManager.cs`:
 
 ```csharp
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using Game.Core.Data;
@@ -131,22 +175,44 @@ namespace Game.Core.Progression {
 
         public static StrategicLayerManager instance { get; private set; }
 
+        // MARK: - Configuration
+
+        [Header("Time Lapse Settings")]
+        [SerializeField] private float secondsPerTick = 0.15f;
+        [SerializeField] private int hoursPerTick = 1;
+
         // MARK: - State
 
         private List<TimeAction> activeActions = new();
-
         private bool isInMission = false;
+        private bool isTimeLapseRunning = false;
+        private bool pauseRequested = false;
+        private TimeSpeed currentSpeed = TimeSpeed.Normal;
+
+        // MARK: - Properties
+
+        public IReadOnlyList<TimeAction> currentActions => activeActions;
+        public bool isAdvancingTime => isTimeLapseRunning;
+        public TimeSpeed speed => currentSpeed;
 
         // MARK: - Events
 
-        public event Action<int> onTimeAdvanced;
+        /// <summary>Fired every tick with the hours that just passed.</summary>
+        public event Action<int> onTick;
 
+        /// <summary>Fired when a new action is queued.</summary>
         public event Action<TimeAction> onActionStarted;
 
+        /// <summary>Fired mid-lapse when an action's timer runs out.</summary>
         public event Action<TimeAction> onActionCompleted;
 
-        public event Action<List<string>> onNewMissionsAvailable;
+        /// <summary>Fired when the time lapse starts.</summary>
+        public event Action onTimeLapseStarted;
 
+        /// <summary>Fired when the time lapse stops (all done or paused).</summary>
+        public event Action onTimeLapseStopped;
+
+        /// <summary>Fired when a world event triggers mid-lapse.</summary>
         public event Action<string> onWorldEventTriggered;
 
         // MARK: - Lifecycle
@@ -164,25 +230,24 @@ namespace Game.Core.Progression {
         // MARK: - Mission State
 
         public void enterMission() {
+            if (isTimeLapseRunning) {
+                pauseTimeLapse();
+            }
             isInMission = true;
-            // Time is frozen during missions
         }
 
         public void exitMission() {
             isInMission = false;
-            // Check for any events that should trigger post-mission
-            checkWorldEvents();
         }
 
-        // MARK: - Time Actions
+        // MARK: - Queue Actions
 
         public bool canStartAction(TimeAction action) {
             if (isInMission) return false;
 
-            // Check if we have an action of this type already running
             foreach (var active in activeActions) {
-                if (active.actionType == action.actionType) {
-                    return false; // Only one of each type at a time
+                if (active.actionType == action.actionType && !active.isComplete) {
+                    return false;
                 }
             }
 
@@ -196,61 +261,92 @@ namespace Game.Core.Progression {
             onActionStarted?.Invoke(action);
         }
 
-        public void advanceTime(int hours) {
-            if (isInMission) {
-                Debug.LogWarning("Cannot advance time during mission");
-                return;
+        public void removeAction(TimeAction action) {
+            activeActions.Remove(action);
+        }
+
+        // MARK: - Time Lapse Controls
+
+        /// <summary>
+        /// Begins the time lapse. Time ticks forward at the configured rate
+        /// until the player pauses or a world event interrupts.
+        /// Works with or without queued actions (fast-forward idle time).
+        /// </summary>
+        public void startTimeLapse() {
+            if (isInMission || isTimeLapseRunning) return;
+
+            pauseRequested = false;
+            StartCoroutine(timeLapseCoroutine());
+        }
+
+        /// <summary>
+        /// Requests the time lapse to pause after the current tick finishes.
+        /// </summary>
+        public void pauseTimeLapse() {
+            pauseRequested = true;
+        }
+
+        /// <summary>
+        /// Immediately advances time by a number of hours without visual ticking.
+        /// Useful for skipping small gaps or scripted events.
+        /// </summary>
+        public void advanceTimeImmediate(int hours) {
+            if (isInMission) return;
+
+            processTick(hours);
+        }
+
+        // MARK: - Tick Loop
+
+        private IEnumerator timeLapseCoroutine() {
+            isTimeLapseRunning = true;
+            onTimeLapseStarted?.Invoke();
+
+            while (!pauseRequested) {
+                processTick(hoursPerTick);
+
+                yield return new WaitForSeconds(secondsPerTick);
             }
 
+            isTimeLapseRunning = false;
+            pauseRequested = false;
+            onTimeLapseStopped?.Invoke();
+
+            // Clean up completed actions
+            activeActions.RemoveAll(a => a.isComplete);
+        }
+
+        private void processTick(int hours) {
             var gm = GameStateManager.instance;
 
             // Advance world time and threat
             gm.progression.advanceTime(hours);
 
-            // Process active actions
-            processActions(hours);
+            // Tick each active action and handle completions
+            foreach (var action in activeActions) {
+                bool justCompleted = action.tick(hours);
 
-            // Check for new content unlocks
-            checkMissionUnlocks();
+                if (justCompleted) {
+                    completeAction(action);
+                }
+            }
 
             // Check for world events
             checkWorldEvents();
 
             // Notify listeners
-            onTimeAdvanced?.Invoke(hours);
-
-            // Publish event bus notification
+            onTick?.Invoke(hours);
             EventBus.publish(new TimeAdvancedEvent { hoursAdvanced = hours });
         }
 
-        public void skipToNextEvent() {
-            // Find the soonest action completion or mission availability
-            int hoursToSkip = findNextEventTime();
-
-            if (hoursToSkip > 0) {
-                advanceTime(hoursToSkip);
-            }
-        }
-
-        // MARK: - Private Methods
-
-        private void processActions(int hours) {
-            var gm = GameStateManager.instance;
-            List<TimeAction> completedActions = new();
-
+        private bool hasPendingActions() {
             foreach (var action in activeActions) {
-                // Decrement remaining time (simplified - actual impl would track remaining)
-                // For now, assume single-step completion
-                if (action.durationHours <= hours) {
-                    completeAction(action);
-                    completedActions.Add(action);
-                }
+                if (!action.isComplete) return true;
             }
-
-            foreach (var completed in completedActions) {
-                activeActions.Remove(completed);
-            }
+            return false;
         }
+
+        // MARK: - Action Completion
 
         private void completeAction(TimeAction action) {
             var gm = GameStateManager.instance;
@@ -273,24 +369,13 @@ namespace Game.Core.Progression {
                     break;
 
                 case TimeActionType.Wait:
-                    // Nothing to do
                     break;
             }
 
             onActionCompleted?.Invoke(action);
         }
 
-        private void checkMissionUnlocks() {
-            // This would check against a mission database
-            // For now, just demonstrate the pattern
-            var gm = GameStateManager.instance;
-
-            // Publish event if new missions available
-            // var newMissions = ContentUnlocker.getNewlyAvailableMissions(...);
-            // if (newMissions.Count > 0) {
-            //     onNewMissionsAvailable?.Invoke(newMissions);
-            // }
-        }
+        // MARK: - World Events
 
         private void checkWorldEvents() {
             var gm = GameStateManager.instance;
@@ -300,7 +385,6 @@ namespace Game.Core.Progression {
                 gm.technology
             );
 
-            // Check difficulty warnings
             string warning = WorldEventTriggers.checkDifficultyWarning(
                 ratio,
                 gm.campaign.activeStoryFlags
@@ -309,19 +393,45 @@ namespace Game.Core.Progression {
             if (warning != null) {
                 gm.campaign.addStoryFlag(warning);
                 onWorldEventTriggered?.Invoke(warning);
+
+                // Pause the lapse so the player sees the event
+                pauseTimeLapse();
             }
         }
 
-        private int findNextEventTime() {
-            int minTime = int.MaxValue;
+        // MARK: - Speed Control
 
-            foreach (var action in activeActions) {
-                if (action.durationHours < minTime) {
-                    minTime = action.durationHours;
-                }
+        public void setSpeed(TimeSpeed speed) {
+            currentSpeed = speed;
+
+            switch (speed) {
+                case TimeSpeed.Normal:
+                    secondsPerTick = 0.15f;
+                    hoursPerTick = 1;
+                    break;
+                case TimeSpeed.Fast:
+                    secondsPerTick = 0.08f;
+                    hoursPerTick = 2;
+                    break;
+                case TimeSpeed.Ultra:
+                    secondsPerTick = 0.03f;
+                    hoursPerTick = 4;
+                    break;
             }
+        }
 
-            return minTime == int.MaxValue ? 24 : minTime; // Default to 1 day
+        public void cycleSpeed() {
+            switch (currentSpeed) {
+                case TimeSpeed.Normal:
+                    setSpeed(TimeSpeed.Fast);
+                    break;
+                case TimeSpeed.Fast:
+                    setSpeed(TimeSpeed.Ultra);
+                    break;
+                case TimeSpeed.Ultra:
+                    setSpeed(TimeSpeed.Normal);
+                    break;
+            }
         }
 
         private void OnDestroy() {
@@ -332,10 +442,37 @@ namespace Game.Core.Progression {
 
     }
 
+    public enum TimeSpeed {
+        Normal,
+        Fast,
+        Ultra
+    }
+
 }
 ```
 
-## Step 4.3: Time Advanced Event
+**How the tick loop works:**
+
+1. Player optionally queues actions (research, heal, build)
+2. Player presses "Advance Time" which calls `startTimeLapse()`
+3. A coroutine begins ticking at `hoursPerTick` hours every `secondsPerTick` real seconds
+4. Each tick: world threat updates, any active action progress bars update via `onTick`
+5. When an action completes mid-lapse, `onActionCompleted` fires (UI can show a popup/notification)
+6. When a world event triggers, the lapse **auto-pauses** so the player can react
+7. The lapse runs **indefinitely** until the player pauses or a world event interrupts — this lets the player fast-forward through idle time when nothing is queued
+8. Player can cycle through speed presets at any time, even mid-lapse
+
+**Speed presets (via `TimeSpeed` enum):**
+
+| TimeSpeed | secondsPerTick | hoursPerTick | Feel                          |
+|-----------|----------------|--------------|-------------------------------|
+| Normal    | 0.15           | 1            | Watch hours tick by            |
+| Fast      | 0.08           | 2            | Quick skip, still readable     |
+| Ultra     | 0.03           | 4            | Rapid fast-forward             |
+
+Call `cycleSpeed()` to rotate Normal → Fast → Ultra → Normal, or `setSpeed(TimeSpeed.Fast)` directly.
+
+## Step 4.3: Events
 
 Create `Assets/Scripts/Core/Events/TimeAdvancedEvent.cs`:
 
@@ -368,52 +505,164 @@ public void completeMainMission(string missionID, float progressValue) {
 }
 ```
 
-## Usage Example: Strategic Layer UI
+## Usage Example: Strategic Layer UI with Progress Bars
 
 ```csharp
+using System.Collections.Generic;
+using UnityEngine;
+using UnityEngine.UI;
+using Game.Core.Progression;
+using Game.Core.GameState;
+
 public class StrategicLayerUI : MonoBehaviour {
 
-    [SerializeField] private Button researchButton;
-    [SerializeField] private Button waitButton;
+    [Header("Controls")]
+    [SerializeField] private Button advanceButton;
+    [SerializeField] private Button pauseButton;
+    [SerializeField] private Button speedButton;
+
+    [Header("Display")]
     [SerializeField] private Text threatLevelText;
+    [SerializeField] private Text elapsedTimeText;
+    [SerializeField] private Text speedText;
+    [SerializeField] private Transform actionListParent;
+    [SerializeField] private GameObject actionEntryPrefab;
+
+    // Tracks spawned UI entries keyed by action id
+    private Dictionary<string, ActionEntryUI> actionEntries = new();
 
     private void Start() {
-        StrategicLayerManager.instance.onTimeAdvanced += OnTimeAdvanced;
-        StrategicLayerManager.instance.onWorldEventTriggered += OnWorldEvent;
+        var slm = StrategicLayerManager.instance;
 
-        researchButton.onClick.AddListener(OnResearchClicked);
-        waitButton.onClick.AddListener(OnWaitClicked);
+        slm.onTick += onTick;
+        slm.onActionStarted += onActionStarted;
+        slm.onActionCompleted += onActionCompleted;
+        slm.onTimeLapseStarted += onTimeLapseStarted;
+        slm.onTimeLapseStopped += onTimeLapseStopped;
+        slm.onWorldEventTriggered += onWorldEvent;
 
-        UpdateDisplay();
+        advanceButton.onClick.AddListener(onAdvanceClicked);
+        pauseButton.onClick.AddListener(onPauseClicked);
+        speedButton.onClick.AddListener(onSpeedClicked);
+
+        pauseButton.gameObject.SetActive(false);
+        updateDisplay();
     }
 
-    private void OnResearchClicked() {
-        // Start research - this will advance time when complete
-        var action = TimeAction.CreateResearch("plasma_weapons", "Plasma Weapons", 72);
+    // MARK: - Button Handlers
+
+    private void onAdvanceClicked() {
+        StrategicLayerManager.instance.startTimeLapse();
+    }
+
+    private void onPauseClicked() {
+        StrategicLayerManager.instance.pauseTimeLapse();
+    }
+
+    private void onSpeedClicked() {
+        StrategicLayerManager.instance.cycleSpeed();
+        updateSpeedDisplay();
+    }
+
+    // MARK: - Adding Actions (called by other UI panels)
+
+    public void queueResearch(string techID, string name, int hours) {
+        var action = TimeAction.createResearch(techID, name, hours);
         StrategicLayerManager.instance.startAction(action);
-
-        // Skip time to completion
-        StrategicLayerManager.instance.skipToNextEvent();
     }
 
-    private void OnWaitClicked() {
-        // Advance time by 24 hours
-        StrategicLayerManager.instance.advanceTime(24);
+    public void queueHealing(string unitID, string name, int hours) {
+        var action = TimeAction.createHealing(unitID, name, hours);
+        StrategicLayerManager.instance.startAction(action);
     }
 
-    private void OnTimeAdvanced(int hours) {
-        UpdateDisplay();
+    // MARK: - Event Handlers
+
+    private void onTick(int hours) {
+        // Update every progress bar each tick
+        foreach (var action in StrategicLayerManager.instance.currentActions) {
+            if (actionEntries.TryGetValue(action.id, out var entry)) {
+                entry.progressBar.fillAmount = action.progress;
+                entry.remainingText.text = $"{action.remainingHours}h remaining";
+            }
+        }
+
+        updateDisplay();
     }
 
-    private void OnWorldEvent(string eventID) {
-        // Show narrative popup
-        ShowEventDialog(eventID);
+    private void onActionStarted(TimeAction action) {
+        // Spawn a new progress bar entry in the UI
+        var go = Instantiate(actionEntryPrefab, actionListParent);
+        var entry = go.GetComponent<ActionEntryUI>();
+        entry.nameText.text = action.displayName;
+        entry.progressBar.fillAmount = 0f;
+        entry.remainingText.text = $"{action.durationHours}h remaining";
+
+        actionEntries[action.id] = entry;
     }
 
-    private void UpdateDisplay() {
+    private void onActionCompleted(TimeAction action) {
+        if (actionEntries.TryGetValue(action.id, out var entry)) {
+            entry.progressBar.fillAmount = 1f;
+            entry.remainingText.text = "Complete!";
+            // Could play a completion animation here
+        }
+    }
+
+    private void onTimeLapseStarted() {
+        advanceButton.gameObject.SetActive(false);
+        pauseButton.gameObject.SetActive(true);
+        speedButton.gameObject.SetActive(true);
+    }
+
+    private void onTimeLapseStopped() {
+        advanceButton.gameObject.SetActive(true);
+        pauseButton.gameObject.SetActive(false);
+        speedButton.gameObject.SetActive(false);
+    }
+
+    private void onWorldEvent(string eventID) {
+        // Show narrative popup — lapse is already paused
+        Debug.Log($"World event triggered: {eventID}");
+    }
+
+    private void updateDisplay() {
         var progression = GameStateManager.instance.progression;
         threatLevelText.text = $"Threat: {progression.worldThreatLevel:F2}";
+
+        int days = progression.totalElapsedHours / 24;
+        int hours = progression.totalElapsedHours % 24;
+        elapsedTimeText.text = $"Day {days + 1}, {hours:D2}:00";
     }
+
+    private void updateSpeedDisplay() {
+        switch (StrategicLayerManager.instance.speed) {
+            case TimeSpeed.Normal:
+                speedText.text = "▶";
+                break;
+            case TimeSpeed.Fast:
+                speedText.text = "▶▶";
+                break;
+            case TimeSpeed.Ultra:
+                speedText.text = "▶▶▶";
+                break;
+        }
+    }
+
+}
+```
+
+**ActionEntryUI** is a simple component on the prefab:
+
+```csharp
+using UnityEngine;
+using UnityEngine.UI;
+
+public class ActionEntryUI : MonoBehaviour {
+
+    public Text nameText;
+    public Image progressBar;  // Image with fillMethod set to Horizontal
+    public Text remainingText;
 
 }
 ```
@@ -422,33 +671,51 @@ public class StrategicLayerUI : MonoBehaviour {
 
 ```
 ┌──────────────────┐
-│  Mission Board   │◄────────────────────┐
-│  (Pick mission)  │                     │
-└────────┬─────────┘                     │
-         │                               │
-         ▼                               │
-┌──────────────────┐                     │
-│  TACTICAL COMBAT │                     │
-│  (Time frozen)   │                     │
-└────────┬─────────┘                     │
-         │ Victory/Defeat                │
-         ▼                               │
-┌──────────────────┐                     │
-│  Results Screen  │                     │
-│  (XP, loot)      │                     │
-└────────┬─────────┘                     │
-         │                               │
-         ▼                               │
-┌──────────────────┐                     │
-│  STRATEGIC LAYER │                     │
-│  - Research      │──► Time Passes ─────┤
-│  - Build         │                     │
-│  - Heal          │                     │
-│  - Explore       │                     │
-└──────────────────┘                     │
-         │                               │
-         │ Ready for next mission        │
-         └───────────────────────────────┘
+│  Mission Board   │◄──────────────────────────┐
+│  (Pick mission)  │                           │
+└────────┬─────────┘                           │
+         │                                     │
+         ▼                                     │
+┌──────────────────┐                           │
+│  TACTICAL COMBAT │                           │
+│  (Time frozen)   │                           │
+└────────┬─────────┘                           │
+         │ Victory/Defeat                      │
+         ▼                                     │
+┌──────────────────┐                           │
+│  Results Screen  │                           │
+│  (XP, loot)      │                           │
+└────────┬─────────┘                           │
+         │                                     │
+         ▼                                     │
+┌──────────────────────────────────────┐       │
+│         STRATEGIC LAYER              │       │
+│                                      │       │
+│  1. Queue actions:                   │       │
+│     [Research: Plasma ──────░░ 0%]   │       │
+│     [Heal: Rook ─────░░░░░░░░ 0%]   │       │
+│     [Build: Armory ──░░░░░░░░ 0%]   │       │
+│                                      │       │
+│  2. Press [▶ Advance Time]           │       │
+│     Speed: [▶] [▶▶] [▶▶▶]           │       │
+│                                      │       │
+│  3. Watch time tick forward:         │       │
+│     [Research: Plasma ██████░░ 72%]  │       │
+│     [Heal: Rook ─────████████ Done!] │       │
+│     [Build: Armory ──███░░░░░ 38%]  │       │
+│          Day 4, 08:00                │       │
+│          Threat: 1.24                │       │
+│                                      │       │
+│  4. Events pause the lapse:          │       │
+│     ⚠ "Enemy faction grows bolder"  │       │
+│     [▶ Resume]  [⏹ Stay]            │       │
+│                                      │       │
+│  5. Nothing queued? Fast-forward:    │       │
+│     Hold [▶▶▶] to skip idle time    │       │
+│     World events still interrupt     │       │
+│                                      │       │
+│  6. Ready → pick next mission        │───────┘
+└──────────────────────────────────────┘
 ```
 
-**Checkpoint:** Create these files. The strategic layer now controls time flow outside of missions.
+**Checkpoint:** Create these files. The strategic layer now ticks time forward visually, with progress bars that fill as hours pass and events that pause the lapse for player decisions.

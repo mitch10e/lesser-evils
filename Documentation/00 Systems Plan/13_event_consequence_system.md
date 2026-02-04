@@ -1,4 +1,4 @@
-# 15. Event & Consequence System
+# 13. Event & Consequence System
 
 **Purpose:** Manages deferred and compounding consequences from earlier player choices. Ensures that decisions made in Act 1 and Act 2 are felt in Act 2 and Act 3 — not just immediately, but over time.
 

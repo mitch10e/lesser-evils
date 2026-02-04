@@ -1,4 +1,4 @@
-# 11. AI Escalation & Difficulty Scaling
+# 9. AI Escalation & Difficulty Scaling
 
 **Purpose:** Makes enemy behavior and mission difficulty adapt to player behavior over the campaign. Rewards careful, ethical play indirectly and punishes reckless efficiency by escalating enemy capability.
 

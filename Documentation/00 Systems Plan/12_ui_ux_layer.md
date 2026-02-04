@@ -1,4 +1,4 @@
-# 14. UI / UX Layer
+# 12. UI / UX Layer
 
 **Purpose:** All player-facing screens and panels. Reads from `GameState` and presents information clearly.
 

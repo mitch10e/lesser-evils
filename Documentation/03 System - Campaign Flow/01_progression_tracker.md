@@ -9,11 +9,6 @@ namespace Game.Core.Data {
 
     public static class ProgressionConstants {
 
-        // Story progress thresholds (0.0 to 1.0)
-        public const float EARLY_GAME_THRESHOLD = 0.25f;
-        public const float MID_GAME_THRESHOLD = 0.50f;
-        public const float LATE_GAME_THRESHOLD = 0.75f;
-
         // World threat settings
         public const float BASE_THREAT_LEVEL = 1.0f;
         public const float THREAT_GROWTH_PER_DAY = 0.02f;
@@ -162,25 +157,6 @@ namespace Game.Core.States {
             float days = totalElapsedHours / (float)ProgressionConstants.HOURS_PER_DAY;
             worldThreatLevel = ProgressionConstants.BASE_THREAT_LEVEL +
                 (days * ProgressionConstants.THREAT_GROWTH_PER_DAY);
-        }
-
-        // MARK: - Progress Queries
-
-        public bool isEarlyGame() {
-            return storyProgress < ProgressionConstants.EARLY_GAME_THRESHOLD;
-        }
-
-        public bool isMidGame() {
-            return storyProgress >= ProgressionConstants.EARLY_GAME_THRESHOLD &&
-                   storyProgress < ProgressionConstants.LATE_GAME_THRESHOLD;
-        }
-
-        public bool isLateGame() {
-            return storyProgress >= ProgressionConstants.LATE_GAME_THRESHOLD;
-        }
-
-        public bool isEndGame() {
-            return storyProgress >= 1.0f;
         }
 
         // MARK: - Reset

@@ -57,23 +57,6 @@ namespace Game.Core.Progression {
             return newMissions;
         }
 
-        // MARK: - Tech Availability
-
-        public static bool isTechTierUnlocked(int tier, ProgressionState progression) {
-            // Tier 1: Always available
-            // Tier 2: After early game (25% progress)
-            // Tier 3: After mid game (50% progress)
-            // Tier 4: After late game (75% progress)
-
-            switch (tier) {
-                case 1: return true;
-                case 2: return progression.storyProgress >= ProgressionConstants.EARLY_GAME_THRESHOLD;
-                case 3: return progression.storyProgress >= ProgressionConstants.MID_GAME_THRESHOLD;
-                case 4: return progression.storyProgress >= ProgressionConstants.LATE_GAME_THRESHOLD;
-                default: return false;
-            }
-        }
-
         // MARK: - Faction Activity
 
         public static bool isFactionActive(FactionType faction, ProgressionState progression) {
@@ -108,35 +91,6 @@ using Game.Core.States;
 namespace Game.Core.Progression {
 
     public static class WorldEventTriggers {
-
-        // MARK: - Progress Milestone Events
-
-        public static List<string> checkProgressMilestones(
-            ProgressionState progression,
-            List<string> alreadyTriggered
-        ) {
-            List<string> newTriggers = new();
-
-            // Early game threshold crossed
-            if (progression.storyProgress >= ProgressionConstants.EARLY_GAME_THRESHOLD &&
-                !alreadyTriggered.Contains("milestone_early_complete")) {
-                newTriggers.Add("milestone_early_complete");
-            }
-
-            // Mid game threshold crossed
-            if (progression.storyProgress >= ProgressionConstants.MID_GAME_THRESHOLD &&
-                !alreadyTriggered.Contains("milestone_mid_complete")) {
-                newTriggers.Add("milestone_mid_complete");
-            }
-
-            // Late game threshold crossed
-            if (progression.storyProgress >= ProgressionConstants.LATE_GAME_THRESHOLD &&
-                !alreadyTriggered.Contains("milestone_late_complete")) {
-                newTriggers.Add("milestone_late_complete");
-            }
-
-            return newTriggers;
-        }
 
         // MARK: - Time-Based Events
 
@@ -198,18 +152,6 @@ The world should feel different based on progression:
 
 ```csharp
 public static class WorldNarrative {
-
-    public static string getWorldStateDescription(ProgressionState progression) {
-        if (progression.isEarlyGame()) {
-            return "The conflict is just beginning. Factions maneuver for advantage.";
-        } else if (progression.isMidGame()) {
-            return "War has escalated. Every faction fights for survival.";
-        } else if (progression.isLateGame()) {
-            return "The endgame approaches. Only the strongest will prevail.";
-        } else {
-            return "The final battle looms.";
-        }
-    }
 
     public static string getThreatDescription(float worldThreatLevel) {
         if (worldThreatLevel < 1.2f) {

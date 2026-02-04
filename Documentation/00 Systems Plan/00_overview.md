@@ -25,12 +25,6 @@ Squad & Unit Management
 Resource & Supply Economy
         │
         ▼
-Faction & Loyalty Tracking
-        │
-        ▼
-Moral / Ethics Tracking
-        │
-        ▼
 Tech Progression & Unlock Gates
         │
         ▼

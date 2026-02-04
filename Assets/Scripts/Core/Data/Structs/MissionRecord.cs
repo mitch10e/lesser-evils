@@ -16,6 +16,10 @@ namespace Game.Core.Data {
 
         public List<string> deadUnitIDs;
 
+        public List<UnitPerformance> unitPerformances;
+
+        public List<LootDrop> collectedLoot;
+
         public Dictionary<ResourceType, int> resourcesGained;
 
         public Dictionary<ResourceType, int> resourcesSpent;
@@ -28,12 +32,14 @@ namespace Game.Core.Data {
             return new MissionRecord {
                 missionID = missionID,
                 wasSuccessful = false,
-                completedOptionalObjectives = new List<string>(),
-                injuredUnitIDs = new List<string>(),
-                deadUnitIDs = new List<string>(),
-                resourcesGained = new Dictionary<ResourceType, int>(),
-                resourcesSpent = new Dictionary<ResourceType, int>(),
-                choicesMade = new List<Choice>(),
+                completedOptionalObjectives = new(),
+                injuredUnitIDs = new(),
+                unitPerformances = new(),
+                collectedLoot = new(),
+                deadUnitIDs = new(),
+                resourcesGained = new(),
+                resourcesSpent = new(),
+                choicesMade = new(),
                 turnsTaken = 0
             };
         }
